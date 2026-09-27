@@ -116,7 +116,7 @@ Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`):
       "args": ["/absolute/path/to/bounty-mcp/src/index.js"],
       "env": {
         "VANGRID_API_URL": "https://data.vangrid.io",
-        "X402_NETWORK": "eip155:8453",
+        "X402_NETWORK": "auto",
         "EVM_PRIVATE_KEY": "0x...",
         "MAX_USD_PER_CALL": "0.05",
         "MAX_USD_PER_BOUNTY": "500"

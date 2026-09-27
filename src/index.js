@@ -73,7 +73,7 @@ server.registerTool(
   {
     title: 'Commission a capture (post a bounty)',
     description:
-      'Commission a ground-level 3D capture of a real place. You pay the bounty amount in USDC on Base right away; Vangrid posts it to its bounty board, a contributor films it, and you review submissions with vangrid_bounty_status and accept one with vangrid_accept_submission to receive the reconstruction. ' +
+      'Commission a ground-level 3D capture of a real place. You pay the bounty amount in USDC on Base or Arc mainnet right away; Vangrid posts it to its bounty board, a contributor films it, and you review submissions with vangrid_bounty_status and accept one with vangrid_accept_submission to receive the reconstruction. ' +
       'If nothing is accepted by the deadline, or you cancel while open, the USDC comes back to your wallet. Amount is whole USDC between the limits the server quotes (by default 50 to 5000). The bounty token is kept locally; later tools only need bounty_id.',
     inputSchema: {
       title: z.string().min(3).max(200).describe('Short name of the place or task'),
