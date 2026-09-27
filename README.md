@@ -25,18 +25,82 @@ Prices are quoted by the server on every request as a `PAYMENT-REQUIRED` header 
 The client never signs a payment above `MAX_USD_PER_CALL` for data or `MAX_USD_PER_BOUNTY` for a
 bounty. A malformed request is refused before a quote, so the wallet never signs for an error.
 
-## Install
+## Setup
+
+Six of the seven tools are paid: they settle in USDC on Base or Arc from a wallet you point
+the server at. This section walks through creating that wallet, funding it and confirming the
+server can talk to the API.
 
 Node 20 or newer. From a checkout:
 
 ```bash
 npm install
-cp .env.example .env       # fill EVM_PRIVATE_KEY for the paid tools
+cp .env.example .env
 ```
 
-Fund the wallet with a few USDC on Base (`X402_NETWORK=eip155:8453`) or Arc
-(`X402_NETWORK=eip155:5042`). Gas is not needed on either: x402 uses a signed USDC transfer
-authorization that the settlement service submits.
+### 1. Create a spending wallet
+
+Use a **fresh, dedicated** wallet. Not your treasury; not the wallet a human uses. The private
+key sits in a file the MCP host reads, and the agent will spend from it on its own.
+
+Either use MetaMask (or any EVM wallet) and copy the private key out, or generate one from the
+command line:
+
+```bash
+node scripts/generate-wallet.mjs
+```
+
+Prints an address and a `0x`-prefixed 64-character private key. Nothing is written to disk.
+
+### 2. Configure `.env`
+
+```
+VANGRID_API_URL=https://data.vangrid.io
+X402_NETWORK=eip155:8453                   # eip155:5042 for Arc
+EVM_PRIVATE_KEY=0x<the key from step 1>
+MAX_USD_PER_CALL=0.05                      # hard cap per data call
+MAX_USD_PER_BOUNTY=500                     # hard cap per bounty
+```
+
+`.env` is git-ignored. Only this process reads it; the key is never sent over the network.
+
+### 3. Fund the wallet
+
+Send USDC on the network you set in `X402_NETWORK` to the address from step 1:
+
+- Base: USDC at `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. Buy on a CEX and withdraw to
+  Base, or bridge with [bridge.base.org](https://bridge.base.org). No ETH is needed: x402 uses
+  a signed USDC transfer authorization and the settlement service submits it.
+- Arc: USDC is the chain's native asset behind the ERC-20 predeploy
+  `0x3600000000000000000000000000000000000000`. Bridge from Base with CCTP, or buy through a
+  service that supports Arc. Gas on Arc is also USDC.
+
+Start with $5 to try the flow, top up as the agent spends. `vangrid_verify_provenance` is
+free, `vangrid_observation` is about $0.005, `vangrid_coverage_query` about $0.01. Bounties
+cost the bounty amount, minimum $50.
+
+### 4. Sanity check without spending
+
+Run the server directly with the key blanked, to confirm it starts and reaches the API:
+
+```bash
+EVM_PRIVATE_KEY= node src/index.js
+```
+
+You should see a single stderr line ending in `wallet=none (free tools only)`. Ctrl-C.
+
+### 5. First real call
+
+Add the server to your MCP host (next section). Ask the agent:
+
+> Is `cf9642dae244a213bc9c0e6d325a84be44fe8fd1f57d9b362c64493769b74a48` a Vangrid capture?
+
+That is `vangrid_verify_provenance`, free, and it confirms end-to-end connectivity. Then:
+
+> Buy the observation for that sha256.
+
+That is `vangrid_observation`, $0.005, and it confirms the wallet can pay. The reply carries
+a `payment.transaction` hash you can open in the explorer for the chosen network.
 
 ## Configure the MCP client
 
