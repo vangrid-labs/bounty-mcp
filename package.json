@@ -1,0 +1,20 @@
+{
+  "name": "vangrid-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MCP server that lets an agent query Vangrid's anchored capture data and pay per request with USDC on Base (x402).",
+  "bin": { "vangrid-mcp": "src/index.js" },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --check src/index.js && node --check src/client.js && node --check src/store.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@x402/evm": "~2.27.0",
+    "@x402/fetch": "~2.27.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0",
+    "zod": "^3.23.8"
+  }
+}
