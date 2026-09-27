@@ -56,7 +56,7 @@ Prints an address and a `0x`-prefixed 64-character private key. Nothing is writt
 
 ```
 VANGRID_API_URL=https://data.vangrid.io
-X402_NETWORK=eip155:8453                   # eip155:5042 for Arc
+X402_NETWORK=auto                          # or eip155:8453 Base / eip155:5042 Arc
 EVM_PRIVATE_KEY=0x<the key from step 1>
 MAX_USD_PER_CALL=0.05                      # hard cap per data call
 MAX_USD_PER_BOUNTY=500                     # hard cap per bounty
@@ -66,7 +66,9 @@ MAX_USD_PER_BOUNTY=500                     # hard cap per bounty
 
 ### 3. Fund the wallet
 
-Send USDC on the network you set in `X402_NETWORK` to the address from step 1:
+Send USDC to the address from step 1, on Base or on Arc. With `X402_NETWORK=auto` the server
+reads the wallet's USDC balance on both and pays where the money is; the balances are printed
+on start (`[vangrid-mcp] wallet USDC: Base 0 USDC, Arc 5 USDC`).
 
 - Base: USDC at `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`. Buy on a CEX and withdraw to
   Base, or bridge with [bridge.base.org](https://bridge.base.org). No ETH is needed: x402 uses
@@ -145,7 +147,9 @@ let the deadline pass, USDC is refunded on the paying network.
 See `.env.example` for the full list. The essentials:
 
 - `VANGRID_API_URL` — API base, defaults to `https://data.vangrid.io`.
-- `X402_NETWORK` — CAIP-2 network to pay on: `eip155:8453` Base or `eip155:5042` Arc.
+- `X402_NETWORK` — `auto` (default): pay on whichever of Base and Arc holds the most USDC for the
+  wallet. Or fix it: `eip155:8453` Base, `eip155:5042` Arc mainnet (`5042` is Arc mainnet, not a typo;
+  `5042002` is Arc Testnet and is not accepted by data.vangrid.io).
 - `EVM_PRIVATE_KEY` — spending wallet. Empty starts the server in read-only mode: the free
   tool works and paid tools return a clear "payment required" message.
 - `MAX_USD_PER_CALL` / `MAX_USD_PER_BOUNTY` — hard caps per request.

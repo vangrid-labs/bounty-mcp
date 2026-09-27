@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Vangrid MCP server (stdio). Seven tools over the x402 API on data.vangrid.io:
 // three for anchored capture data, four for commissioning captures through bounties.
-// Paid tools settle in USDC on Base from the wallet in EVM_PRIVATE_KEY. Data calls are
+// Paid tools settle in USDC on Base or Arc from the wallet in EVM_PRIVATE_KEY (network picked
+// by balance unless X402_NETWORK fixes it). Data calls are
 // capped by MAX_USD_PER_CALL, bounties by MAX_USD_PER_BOUNTY. Without a key the free
 // tools still work and paid ones explain what is missing.
 
@@ -9,7 +10,7 @@ import 'dotenv/config';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { loadClientConfig, buildFetch, callApi } from './client.js';
+import { loadClientConfig, buildFetch, callApi, usdcBalances, describeBalances } from './client.js';
 import { rememberToken, tokenFor, listRemembered } from './store.js';
 
 const cfg = loadClientConfig();
@@ -32,7 +33,7 @@ server.registerTool(
     title: 'Vangrid coverage query',
     description:
       'Find anchored ground-level captures inside an area and time window. Each observation carries a coarse location (geohash precision 6), capture time and the EAS attestation on Base that anchors it. ' +
-      'Paid per call in USDC on Base (about $0.01). Area: GeoJSON Point with radius_m (max 5000) or a Polygon whose bounding box is at most 100 km².',
+      'Paid per call in USDC on Base (eip155:8453) or Arc mainnet (eip155:5042), about $0.01. Area: GeoJSON Point with radius_m (max 5000) or a Polygon whose bounding box is at most 100 km².',
     inputSchema: {
       aoi: z.object({ type: z.enum(['Point', 'Polygon']), coordinates: z.any() }).describe('GeoJSON geometry: Point [lng, lat] or Polygon [[[lng, lat], ...]]'),
       radius_m: z.number().min(1).max(5000).optional().describe('Point only: radius in metres, default 500'),
@@ -49,7 +50,7 @@ server.registerTool(
   'vangrid_observation',
   {
     title: 'Vangrid observation',
-    description: 'Fetch one anchored capture by its sha256 (with or without 0x): coarse location, capture time and EAS attestation on Base. Paid per call in USDC on Base (about $0.005).',
+    description: 'Fetch one anchored capture by its sha256 (with or without 0x): coarse location, capture time and EAS attestation on Base. Paid per call in USDC on Base (eip155:8453) or Arc mainnet (eip155:5042), about $0.005.',
     inputSchema: { id: z.string().describe('sha256 hex of the capture') },
   },
   async ({ id }) => result(await callApi(client, cfg, `/api/v1/observations/${encodeURIComponent(id)}`)),
@@ -138,3 +139,9 @@ await server.connect(transport);
 console.error(
   `[vangrid-mcp] ready api=${cfg.apiUrl} network=${cfg.network} wallet=${client.address || 'none (free tools only)'} caps=$${cfg.maxUsd}/call $${cfg.maxUsdBounty}/bounty`,
 );
+if (client.address) {
+  // One line with what the wallet can pay with, so a missing top-up shows up before the first call.
+  usdcBalances(cfg, client.address)
+    .then((b) => console.error(`[vangrid-mcp] wallet USDC: ${describeBalances(b)}`))
+    .catch(() => {});
+}
