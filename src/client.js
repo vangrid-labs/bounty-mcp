@@ -13,6 +13,7 @@ const ARC_USDC = {
 
 // Networks the server can pay on, with the USDC contract and public RPCs used to read the
 // wallet balance. RPCs are overridable per network (BASE_RPC_URL, ARC_RPC_URL).
+// Reading a balance discloses the wallet address to whichever RPC answers; see SECURITY.md.
 export const NETWORKS = {
   'eip155:8453': {
     name: 'Base',
@@ -26,7 +27,14 @@ export const NETWORKS = {
     rpcEnv: 'ARC_RPC_URL',
     rpcs: ['https://rpc.mainnet.arc.io'],
   },
+  'eip155:84532': {
+    name: 'Base Sepolia',
+    usdc: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+    rpcEnv: 'BASE_SEPOLIA_RPC_URL',
+    rpcs: ['https://sepolia.base.org'],
+  },
 };
+// Mainnets only: "auto" never selects a testnet, and never reads a balance on one.
 const AUTO_ORDER = ['eip155:8453', 'eip155:5042'];
 const BALANCE_ABI = [{ name: 'balanceOf', type: 'function', stateMutability: 'view', inputs: [{ name: 'a', type: 'address' }], outputs: [{ type: 'uint256' }] }];
 const BALANCE_TTL_MS = 60_000;
@@ -35,13 +43,16 @@ export function loadClientConfig(env = process.env) {
   const apiUrl = (env.VANGRID_API_URL || 'https://data.vangrid.io').replace(/\/+$/, '');
   // "auto" (default): pay on whichever of Base and Arc holds the most USDC for this wallet.
   const network = (env.X402_NETWORK || 'auto').trim();
-  if (network !== 'auto' && !NETWORKS[network] && !ARC_USDC[network] && network !== 'eip155:84532') {
-    throw new Error(`X402_NETWORK must be auto, eip155:8453 (Base) or eip155:5042 (Arc); got ${network}`);
+  if (network !== 'auto' && !NETWORKS[network] && !ARC_USDC[network]) {
+    const known = [...new Set([...Object.keys(NETWORKS), ...Object.keys(ARC_USDC)])].join(', ');
+    throw new Error(`X402_NETWORK must be auto or one of ${known}; got ${network}`);
   }
   const maxUsd = env.MAX_USD_PER_CALL == null || env.MAX_USD_PER_CALL === '' ? 0.05 : Number(env.MAX_USD_PER_CALL);
   if (!Number.isFinite(maxUsd) || maxUsd <= 0) throw new Error('MAX_USD_PER_CALL must be a positive number');
-  const maxUsdBounty = env.MAX_USD_PER_BOUNTY == null || env.MAX_USD_PER_BOUNTY === '' ? 500 : Number(env.MAX_USD_PER_BOUNTY);
+  const maxUsdBounty = env.MAX_USD_PER_BOUNTY == null || env.MAX_USD_PER_BOUNTY === '' ? 100 : Number(env.MAX_USD_PER_BOUNTY);
   if (!Number.isFinite(maxUsdBounty) || maxUsdBounty <= 0) throw new Error('MAX_USD_PER_BOUNTY must be a positive number');
+  const httpTimeoutMs = env.VANGRID_HTTP_TIMEOUT_MS == null || env.VANGRID_HTTP_TIMEOUT_MS === '' ? 30_000 : Number(env.VANGRID_HTTP_TIMEOUT_MS);
+  if (!Number.isFinite(httpTimeoutMs) || httpTimeoutMs <= 0) throw new Error('VANGRID_HTTP_TIMEOUT_MS must be a positive number of milliseconds');
   const key = (env.EVM_PRIVATE_KEY || '').trim();
   if (key && !/^0x[0-9a-fA-F]{64}$/.test(key)) throw new Error('EVM_PRIVATE_KEY must be a 0x-prefixed 32-byte hex key');
   const rpc = {};
@@ -49,7 +60,17 @@ export function loadClientConfig(env = process.env) {
     const custom = (env[n.rpcEnv] || '').trim();
     rpc[id] = custom ? [custom, ...n.rpcs] : n.rpcs;
   }
-  return { apiUrl, network, maxUsd, maxUsdBounty, privateKey: key || null, rpc };
+  return { apiUrl, network, maxUsd, maxUsdBounty, httpTimeoutMs, privateKey: key || null, rpc };
+}
+
+/**
+ * Networks whose balance is worth reading for this config: in auto mode the two mainnets that
+ * "auto" chooses between, otherwise only the one network that will be paid on. Keeping this
+ * narrow limits how many third-party RPCs learn the wallet address.
+ */
+export function balanceNetworks(cfg) {
+  if (cfg.network === 'auto') return AUTO_ORDER;
+  return NETWORKS[cfg.network] ? [cfg.network] : [];
 }
 
 /**
@@ -58,11 +79,14 @@ export function loadClientConfig(env = process.env) {
  */
 const balanceCache = new Map();
 export async function usdcBalances(cfg, address) {
-  const hit = balanceCache.get(address);
+  const ids = balanceNetworks(cfg);
+  const cacheKey = `${address}|${ids.join(',')}`;
+  const hit = balanceCache.get(cacheKey);
   if (hit && Date.now() - hit.at < BALANCE_TTL_MS) return hit.balances;
   const balances = {};
   await Promise.all(
-    Object.entries(NETWORKS).map(async ([id, n]) => {
+    ids.map(async (id) => {
+      const n = NETWORKS[id];
       try {
         const client = createPublicClient({ transport: fallback(cfg.rpc[id].map((u) => http(u, { timeout: 8_000 }))) });
         const raw = await client.readContract({ address: n.usdc, abi: BALANCE_ABI, functionName: 'balanceOf', args: [address] });
@@ -72,13 +96,15 @@ export async function usdcBalances(cfg, address) {
       }
     }),
   );
-  balanceCache.set(address, { at: Date.now(), balances });
+  balanceCache.set(cacheKey, { at: Date.now(), balances });
   return balances;
 }
 
 /** "Base 4.2 USDC, Arc 0 USDC" for messages; unreadable networks say so. */
 export function describeBalances(balances) {
-  return AUTO_ORDER.map((id) => `${NETWORKS[id].name} ${balances?.[id] == null ? 'unreadable' : `${balances[id]} USDC`}`).join(', ');
+  const ids = Object.keys(balances || {});
+  if (!ids.length) return 'not read';
+  return ids.map((id) => `${NETWORKS[id]?.name || id} ${balances[id] == null ? 'unreadable' : `${balances[id]} USDC`}`).join(', ');
 }
 
 /** Network to pay on for this call: the configured one, or in auto mode the richest one. */
@@ -138,8 +164,31 @@ function decodeRequired(res) {
 
 /** Call the API; returns { ok, status, body, payment } with a readable message on 402. */
 export async function callApi(client, cfg, path, init = {}) {
+  try {
+    return await attemptCall(client, cfg, path, init);
+  } catch (err) {
+    const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+    return {
+      ok: false,
+      status: 0,
+      body: { error: timedOut ? 'api_timeout' : 'api_unreachable' },
+      payment: null,
+      message: timedOut
+        ? `Vangrid API did not answer within ${cfg.httpTimeoutMs ?? 30_000} ms (${cfg.apiUrl}${path}). Raise VANGRID_HTTP_TIMEOUT_MS or retry.`
+        : `Could not reach the Vangrid API at ${cfg.apiUrl}${path}: ${err?.message || err}`,
+    };
+  }
+}
+
+async function attemptCall(client, cfg, path, init) {
   const url = `${cfg.apiUrl}${path}`;
-  const req = { ...init, headers: { accept: 'application/json', ...(init.headers || {}) } };
+  // Without this the API call has no deadline and a hung server stalls the tool forever.
+  // The budget covers the whole x402 exchange: the 402, the signature and the retry.
+  const req = {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(cfg.httpTimeoutMs ?? 30_000),
+    headers: { accept: 'application/json', ...(init.headers || {}) },
+  };
   let chosen = null;
   let doFetch = client.fetch;
   if (client.paid) {
@@ -184,6 +233,9 @@ async function finish(res, chosen, client, cfg) {
     const req = decodeRequired(res);
     const offer = req?.accepts?.[0];
     const usd = offer?.amount ? Number(offer.amount) / 1e6 : null;
+    // The server's own reason (e.g. facilitator_http_403) is the actual cause. Report it
+    // verbatim first; guessing from the balance alone sends people to top up a funded wallet.
+    const reported = body?.error || req?.error || body?.message || null;
     let why = 'no EVM_PRIVATE_KEY configured, so the server could not be paid';
     if (client.paid) {
       const balances = chosen?.balances || (await usdcBalances(cfg, client.address));
@@ -196,7 +248,7 @@ async function finish(res, chosen, client, cfg) {
       status: 402,
       body,
       payment: null,
-      message: `Payment required${usd != null ? ` (${usd} USDC per call)` : ''}: ${why}.`,
+      message: `Payment required${usd != null ? ` (${usd} USDC per call)` : ''}: ${reported ? `server reported ${reported}; ` : ''}${why}.`,
     };
   }
   return { ok: res.ok, status: res.status, body, payment };

@@ -23,15 +23,29 @@ with a few USDC on Base or Arc. No account, no API key.
 
 Prices are quoted by the server on every request as a `PAYMENT-REQUIRED` header and can move.
 The client never signs a payment above `MAX_USD_PER_CALL` for data or `MAX_USD_PER_BOUNTY` for a
-bounty. A malformed request is refused before a quote, so the wallet never signs for an error.
+bounty.
+
+On the two data routes the wallet signs an EIP-3009 authorization *before* the request is
+validated, so a malformed request can produce a signature. Nothing is captured for one: x402
+cancels settlement when the route answers 4xx. Bounty routes still validate before quoting.
+
+Two tool calls are free but not harmless: `vangrid_accept_submission` releases the escrow and
+`vangrid_cancel_bounty` ends the bounty, both irreversible and neither covered by the spend
+caps, which only constrain signing. Gate them behind human approval for an unattended agent —
+see [SECURITY.md](SECURITY.md).
 
 ## Setup
 
-Six of the seven tools are paid: they settle in USDC on Base or Arc from a wallet you point
-the server at. This section walks through creating that wallet, funding it and confirming the
-server can talk to the API.
+Three of the seven tools are paid — `vangrid_coverage_query`, `vangrid_observation` and
+`vangrid_post_bounty`. They settle in USDC on Base or Arc from a wallet you point the server at.
+This section walks through creating that wallet, funding it and confirming the server can talk
+to the API.
 
-Node 20 or newer. From a checkout:
+Node 20 or newer. Nothing to install up front: the MCP host launches the server through `npx`
+(see [Configure the MCP client](#configure-the-mcp-client)), which fetches `@vangrid/mcp` on
+first run. Step 4 below is the check that it works.
+
+To work from a checkout instead:
 
 ```bash
 npm install
@@ -50,7 +64,10 @@ command line:
 node scripts/generate-wallet.mjs
 ```
 
-Prints an address and a `0x`-prefixed 64-character private key. Nothing is written to disk.
+Prints the address and writes the private key to `.vangrid-wallet` with mode `0600` — it is
+never printed, so it does not end up in shell scrollback or history. The file is git-ignored.
+Append it to your `.env` (`cat .vangrid-wallet >> .env`), then delete it once the key is where
+your MCP host reads it.
 
 ### 2. Configure `.env`
 
@@ -59,7 +76,7 @@ VANGRID_API_URL=https://data.vangrid.io
 X402_NETWORK=auto                          # or eip155:8453 Base / eip155:5042 Arc
 EVM_PRIVATE_KEY=0x<the key from step 1>
 MAX_USD_PER_CALL=0.05                      # hard cap per data call
-MAX_USD_PER_BOUNTY=500                     # hard cap per bounty
+MAX_USD_PER_BOUNTY=100                     # hard cap per bounty
 ```
 
 `.env` is git-ignored. Only this process reads it; the key is never sent over the network.
@@ -86,7 +103,7 @@ cost the bounty amount, minimum $50.
 Run the server directly with the key blanked, to confirm it starts and reaches the API:
 
 ```bash
-EVM_PRIVATE_KEY= node src/index.js
+EVM_PRIVATE_KEY= npx @vangrid/mcp        # or, from a checkout: node src/index.js
 ```
 
 You should see a single stderr line ending in `wallet=none (free tools only)`. Ctrl-C.
@@ -112,14 +129,14 @@ Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`):
 {
   "mcpServers": {
     "vangrid": {
-      "command": "node",
-      "args": ["/absolute/path/to/bounty-mcp/src/index.js"],
+      "command": "npx",
+      "args": ["-y", "@vangrid/mcp"],
       "env": {
         "VANGRID_API_URL": "https://data.vangrid.io",
         "X402_NETWORK": "auto",
         "EVM_PRIVATE_KEY": "0x...",
         "MAX_USD_PER_CALL": "0.05",
-        "MAX_USD_PER_BOUNTY": "500"
+        "MAX_USD_PER_BOUNTY": "100"
       }
     }
   }
@@ -129,8 +146,10 @@ Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`):
 Claude Code:
 
 ```bash
-claude mcp add vangrid -e EVM_PRIVATE_KEY=0x... -- node /absolute/path/to/bounty-mcp/src/index.js
+claude mcp add vangrid -e EVM_PRIVATE_KEY=0x... -- npx -y @vangrid/mcp
 ```
+
+From a checkout, point the host at the file instead: `node /absolute/path/to/bounty-mcp/src/index.js`.
 
 ## How the bounty flow works
 
@@ -152,8 +171,13 @@ See `.env.example` for the full list. The essentials:
   `5042002` is Arc Testnet and is not accepted by data.vangrid.io).
 - `EVM_PRIVATE_KEY` — spending wallet. Empty starts the server in read-only mode: the free
   tool works and paid tools return a clear "payment required" message.
-- `MAX_USD_PER_CALL` / `MAX_USD_PER_BOUNTY` — hard caps per request.
+- `MAX_USD_PER_CALL` / `MAX_USD_PER_BOUNTY` — hard caps per request. Defaults $0.05 and $100.
+  They cap signing only; the free irreversible tools are not covered. See [SECURITY.md](SECURITY.md).
 - `VANGRID_MCP_STORE` — override the bounty token file (default `~/.vangrid-mcp/bounties.json`).
+- `VANGRID_HTTP_TIMEOUT_MS` — deadline for the whole API call including the x402 retry,
+  default `30000`.
+- `BASE_RPC_URL` / `ARC_RPC_URL` / `BASE_SEPOLIA_RPC_URL` — read the wallet balance through an
+  RPC you control instead of the public defaults, which otherwise learn the wallet address.
 
 ## Read-only mode
 
@@ -178,4 +202,4 @@ call before a wallet is attached.
 
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).
