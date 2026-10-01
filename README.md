@@ -42,8 +42,8 @@ This section walks through creating that wallet, funding it and confirming the s
 to the API.
 
 Node 20 or newer. Nothing to install up front: the MCP host launches the server through `npx`
-(see [Configure the MCP client](#configure-the-mcp-client)), which fetches `@vangrid/mcp` on
-first run. Step 4 below is the check that it works.
+(see [Configure the MCP client](#configure-the-mcp-client)), which fetches the server straight
+from GitHub on first run. Step 4 below is the check that it works.
 
 To work from a checkout instead:
 
@@ -103,7 +103,7 @@ cost the bounty amount, minimum $50.
 Run the server directly with the key blanked, to confirm it starts and reaches the API:
 
 ```bash
-EVM_PRIVATE_KEY= npx @vangrid/mcp        # or, from a checkout: node src/index.js
+EVM_PRIVATE_KEY= npx -y github:vangrid-labs/bounty-mcp   # or, from a checkout: node src/index.js
 ```
 
 You should see a single stderr line ending in `wallet=none (free tools only)`. Ctrl-C.
@@ -130,7 +130,7 @@ Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`):
   "mcpServers": {
     "vangrid": {
       "command": "npx",
-      "args": ["-y", "@vangrid/mcp"],
+      "args": ["-y", "github:vangrid-labs/bounty-mcp"],
       "env": {
         "VANGRID_API_URL": "https://data.vangrid.io",
         "X402_NETWORK": "auto",
@@ -146,7 +146,7 @@ Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`):
 Claude Code:
 
 ```bash
-claude mcp add vangrid -e EVM_PRIVATE_KEY=0x... -- npx -y @vangrid/mcp
+claude mcp add vangrid -e EVM_PRIVATE_KEY=0x... -- npx -y github:vangrid-labs/bounty-mcp
 ```
 
 From a checkout, point the host at the file instead: `node /absolute/path/to/bounty-mcp/src/index.js`.
@@ -168,7 +168,9 @@ See `.env.example` for the full list. The essentials:
 - `VANGRID_API_URL` — API base, defaults to `https://data.vangrid.io`.
 - `X402_NETWORK` — `auto` (default): pay on whichever of Base and Arc holds the most USDC for the
   wallet. Or fix it: `eip155:8453` Base, `eip155:5042` Arc mainnet (`5042` is Arc mainnet, not a typo;
-  `5042002` is Arc Testnet and is not accepted by data.vangrid.io).
+  `5042002` is Arc Testnet and is not accepted by data.vangrid.io), or `eip155:84532` Base Sepolia
+  for testing against a staging API. `auto` only ever picks a mainnet, so a testnet has to be named
+  explicitly.
 - `EVM_PRIVATE_KEY` — spending wallet. Empty starts the server in read-only mode: the free
   tool works and paid tools return a clear "payment required" message.
 - `MAX_USD_PER_CALL` / `MAX_USD_PER_BOUNTY` — hard caps per request. Defaults $0.05 and $100.
